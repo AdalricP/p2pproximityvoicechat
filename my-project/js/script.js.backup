@@ -1,0 +1,494 @@
+// Basic Three.js cube demo (non-module version)
+(function () {
+  const container = document.getElementById('container');
+
+  // WebSocket variables
+  let ws;
+  let myPlayerId;
+  let otherPlayerCube;
+  let lastSentTime = 0;
+  const UPDATE_INTERVAL = 50; // Send updates every 50ms
+
+  // Voice chat variables
+  let localStream;
+  let peerConnection;
+  let audioContext;
+  let gainNode;
+  let dataChannel; // P2P data channel for position updates
+  const MAX_VOICE_DISTANCE = 10; // Maximum distance to hear voice
+  const configuration = {
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  };
+
+  // Scene, camera, renderer
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x111111);
+
+  const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+  camera.position.set(0, 0, 20.0);
+  // Ensure camera looks at the scene center where the cube is placed
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio ? window.devicePixelRatio : 1);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  // Make canvas behave like a block-level element and avoid inline spacing issues
+  renderer.domElement.style.display = 'block';
+  container.appendChild(renderer.domElement);
+
+  // Simple keyboard state map
+  // Keys are stored by their `e.key` (e.g. 'ArrowRight', 'a', ' ') so you can check
+  // `keyboard['ArrowRight']` in the animation loop (already present in the file).
+  const keyboard = {};
+
+  // Prevent arrow keys from scrolling the page and track key state
+  window.addEventListener('keydown', function (e) {
+    // prevent page scroll for common navigation keys used here
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
+      e.preventDefault();
+    }
+    keyboard[e.key] = true;
+  }, false);
+
+  window.addEventListener('keyup', function (e) {
+    keyboard[e.key] = false;
+  }, false);
+
+  // Cube
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const material = new THREE.MeshStandardMaterial({ color: 0x4aa3f0, metalness: 0.2, roughness: 0.6 });
+  const cube = new THREE.Mesh(geometry, material);
+  // ensure cube is centered in the world
+  cube.position.set(0, 0, 0);
+  scene.add(cube);
+
+  // WebSocket Functions
+  function initWebSocket() {
+    // Connect to the same server the page was loaded from
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.hostname;
+    const port = window.location.port || '8080';
+    
+    ws = new WebSocket(`${protocol}//${host}:${port}`);
+    
+    ws.onopen = () => {
+      console.log('Connected to server');
+      updateStatus('Connected to server');
+      initVoiceChat(); // Initialize voice chat after connecting
+    };
+    
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      switch(data.type) {
+        case 'init':
+          myPlayerId = data.playerId;
+          console.log('My player ID:', myPlayerId);
+          updateStatus(`Connected as Player ${myPlayerId}`);
+          break;
+          
+        case 'players_ready':
+          console.log('Both players connected!');
+          updateStatus('Both players connected! Setting up P2P connection...');
+          createOtherPlayerCube();
+          setupPeerConnection();
+          break;
+          
+        case 'position':
+          // Fallback to WebSocket if P2P data channel not ready
+          if (!dataChannel || dataChannel.readyState !== 'open') {
+            updateOtherPlayer(data.position, data.rotation);
+            updateProximityVolume(data.position);
+          }
+          break;
+          
+        case 'player_disconnected':
+          console.log('Other player disconnected');
+          updateStatus('Other player disconnected. Waiting for player...');
+          removeOtherPlayerCube();
+          closePeerConnection();
+          break;
+
+        case 'server_full':
+          console.log('Server is full');
+          updateStatus('Server is full (max 2 players)');
+          break;
+
+        // WebRTC signaling messages
+        case 'offer':
+          handleOffer(data.offer);
+          break;
+        case 'answer':
+          handleAnswer(data.answer);
+          break;
+        case 'ice-candidate':
+          handleIceCandidate(data.candidate);
+          break;
+      }
+    };
+    
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      updateStatus('Connection error');
+    };
+    
+    ws.onclose = () => {
+      console.log('Disconnected from server');
+      updateStatus('Disconnected from server');
+      removeOtherPlayerCube();
+    };
+  }
+
+  function sendPosition(position, rotation) {
+    const now = Date.now();
+    if (now - lastSentTime >= UPDATE_INTERVAL) {
+      const positionData = JSON.stringify({
+        type: 'position',
+        position: { x: position.x, y: position.y, z: position.z },
+        rotation: { x: rotation.x, y: rotation.y, z: rotation.z }
+      });
+
+      // Try P2P data channel first, fallback to WebSocket
+      if (dataChannel && dataChannel.readyState === 'open') {
+        dataChannel.send(positionData);
+      } else if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(positionData);
+      }
+      
+      lastSentTime = now;
+    }
+  }
+
+  function createOtherPlayerCube() {
+    if (otherPlayerCube) return; // Already exists
+    
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshStandardMaterial({ color: 0xff4444, metalness: 0.2, roughness: 0.6 });
+    otherPlayerCube = new THREE.Mesh(geometry, material);
+    otherPlayerCube.position.set(0, 0, 0);
+    scene.add(otherPlayerCube);
+  }
+
+  function updateOtherPlayer(position, rotation) {
+    if (otherPlayerCube) {
+      otherPlayerCube.position.set(position.x, position.y, position.z);
+      otherPlayerCube.rotation.set(rotation.x, rotation.y, rotation.z);
+    }
+  }
+
+  function removeOtherPlayerCube() {
+    if (otherPlayerCube) {
+      scene.remove(otherPlayerCube);
+      otherPlayerCube = null;
+    }
+  }
+
+  function updateStatus(message) {
+    if (statusDiv) {
+      statusDiv.textContent = message;
+    }
+  }
+
+  // Voice Chat Functions
+  async function initVoiceChat() {
+    try {
+      // Check if getUserMedia is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('getUserMedia not supported. Please open via HTTP (http://localhost:8080), not file://');
+      }
+      
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      console.log('Microphone access granted');
+      updateStatus('Microphone ready. Waiting for other player...');
+      
+      // Create audio context for proximity volume control
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      gainNode = audioContext.createGain();
+      gainNode.connect(audioContext.destination);
+      
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+      updateStatus('❌ Error: ' + error.message);
+      
+      // Show helpful message if opened via file://
+      if (window.location.protocol === 'file:') {
+        updateStatus('⚠️ Please open http://localhost:8080 (not file://)');
+      }
+    }
+  }
+
+  async function setupPeerConnection() {
+    if (!localStream) {
+      console.log('Waiting for local stream...');
+      return;
+    }
+
+    peerConnection = new RTCPeerConnection(configuration);
+
+    // Create P2P data channel for position updates
+    dataChannel = peerConnection.createDataChannel('gameData');
+    
+    dataChannel.onopen = () => {
+      console.log('✅ P2P Data Channel opened - now using direct P2P for positions!');
+      updateStatus('🎮 P2P Connected! Voice + Position via direct connection.');
+    };
+
+    dataChannel.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'position') {
+        updateOtherPlayer(data.position, data.rotation);
+        updateProximityVolume(data.position);
+      }
+    };
+
+    dataChannel.onerror = (error) => {
+      console.error('Data channel error:', error);
+      updateStatus('Data channel error - falling back to server relay');
+    };
+
+    dataChannel.onclose = () => {
+      console.log('Data channel closed');
+      updateStatus('P2P connection lost - using server relay');
+    };
+
+    // Add local audio tracks
+    localStream.getTracks().forEach(track => {
+      peerConnection.addTrack(track, localStream);
+    });
+
+    // Handle incoming audio
+    peerConnection.ontrack = (event) => {
+      console.log('Received remote audio track');
+      const remoteAudio = new Audio();
+      remoteAudio.srcObject = event.streams[0];
+      
+      // Connect to gain node for proximity audio
+      const source = audioContext.createMediaStreamSource(event.streams[0]);
+      source.connect(gainNode);
+      
+      remoteAudio.play().catch(e => console.error('Error playing audio:', e));
+    };
+
+    // Handle ICE candidates
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        ws.send(JSON.stringify({
+          type: 'ice-candidate',
+          candidate: event.candidate
+        }));
+      }
+    };
+
+    // Create and send offer
+    try {
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      ws.send(JSON.stringify({
+        type: 'offer',
+        offer: offer
+      }));
+      console.log('Sent WebRTC offer');
+    } catch (error) {
+      console.error('Error creating offer:', error);
+    }
+  }
+
+  async function handleOffer(offer) {
+    if (!localStream) {
+      console.log('Waiting for local stream before handling offer...');
+      setTimeout(() => handleOffer(offer), 500);
+      return;
+    }
+
+    peerConnection = new RTCPeerConnection(configuration);
+
+    // Handle incoming data channel from the other peer
+    peerConnection.ondatachannel = (event) => {
+      dataChannel = event.channel;
+      
+      dataChannel.onopen = () => {
+        console.log('✅ P2P Data Channel opened - now using direct P2P for positions!');
+        updateStatus('P2P Connected! Voice + Position via direct connection.');
+      };
+
+      dataChannel.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'position') {
+          updateOtherPlayer(data.position, data.rotation);
+          updateProximityVolume(data.position);
+        }
+      };
+
+      dataChannel.onerror = (error) => {
+        console.error('Data channel error:', error);
+      };
+
+      dataChannel.onclose = () => {
+        console.log('Data channel closed');
+      };
+    };
+
+    // Add local audio tracks
+    localStream.getTracks().forEach(track => {
+      peerConnection.addTrack(track, localStream);
+    });
+
+    // Handle incoming audio
+    peerConnection.ontrack = (event) => {
+      console.log('Received remote audio track');
+      const remoteAudio = new Audio();
+      remoteAudio.srcObject = event.streams[0];
+      
+      // Connect to gain node for proximity audio
+      const source = audioContext.createMediaStreamSource(event.streams[0]);
+      source.connect(gainNode);
+      
+      remoteAudio.play().catch(e => console.error('Error playing audio:', e));
+    };
+
+    // Handle ICE candidates
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        ws.send(JSON.stringify({
+          type: 'ice-candidate',
+          candidate: event.candidate
+        }));
+      }
+    };
+
+    try {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      ws.send(JSON.stringify({
+        type: 'answer',
+        answer: answer
+      }));
+      console.log('Sent WebRTC answer');
+    } catch (error) {
+      console.error('Error handling offer:', error);
+    }
+  }
+
+  async function handleAnswer(answer) {
+    try {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      console.log('WebRTC connection established');
+    } catch (error) {
+      console.error('Error handling answer:', error);
+    }
+  }
+
+  async function handleIceCandidate(candidate) {
+    try {
+      if (peerConnection) {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      }
+    } catch (error) {
+      console.error('Error adding ICE candidate:', error);
+    }
+  }
+
+  function updateProximityVolume(otherPosition) {
+    if (!gainNode || !cube || !otherPosition) return;
+
+    // Calculate distance between players
+    const distance = Math.sqrt(
+      Math.pow(cube.position.x - otherPosition.x, 2) +
+      Math.pow(cube.position.y - otherPosition.y, 2) +
+      Math.pow(cube.position.z - otherPosition.z, 2)
+    );
+
+    // Inverse square law: volume = 1 / (distance^2)
+    // Add a small reference distance to prevent division by zero and extreme volumes
+    const referenceDistance = 1.0; // Minimum distance for full volume
+    const adjustedDistance = Math.max(distance, referenceDistance);
+    
+    // Calculate volume using inverse square law
+    let volume = Math.pow(referenceDistance / adjustedDistance, 2);
+    
+    // Scale down if beyond max distance
+    if (distance > MAX_VOICE_DISTANCE) {
+      volume = 0;
+    }
+    
+    // Clamp volume between 0 and 1
+    volume = Math.max(0, Math.min(1, volume));
+
+    gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+    
+    // Log every update to see distance and volume
+    console.log(`📏 Distance: ${distance.toFixed(2)} | 🔊 Volume: ${volume.toFixed(3)} | Formula: 1/(${adjustedDistance.toFixed(2)})² = ${volume.toFixed(3)}`);
+  }
+
+  function closePeerConnection() {
+    if (dataChannel) {
+      dataChannel.close();
+      dataChannel = null;
+    }
+    if (peerConnection) {
+      peerConnection.close();
+      peerConnection = null;
+    }
+  }
+
+  // Light
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+  hemi.position.set(0, 1, 0);
+  scene.add(hemi);
+
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(5, 10, 7.5);
+  scene.add(dir);
+
+  // Resize handling
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+  window.addEventListener('resize', onWindowResize, false);
+
+  // Animation loop
+  function animate() {
+    requestAnimationFrame(animate);
+    // Arrow key movement (adjust values to taste)
+    if (keyboard['ArrowRight']) cube.position.x += 0.3;
+    if (keyboard['ArrowLeft'])  cube.position.x -= 0.3;
+    if (keyboard['ArrowUp'])    cube.position.y += 0.3;
+    if (keyboard['ArrowDown'])  cube.position.y -= 0.3;
+    // Spacebar to reset position
+    if (keyboard[' ']) {
+      cube.position.set(0, 0, 0);
+    }
+    
+    // Send position updates to other player
+    sendPosition(cube.position, cube.rotation);
+    
+    // Update overlay with cube position if overlay exists
+    if (typeof info !== 'undefined' && info) {
+      info.textContent = `pos: x=${cube.position.x.toFixed(2)} y=${cube.position.y.toFixed(2)} z=${cube.position.z.toFixed(2)}`;
+    }
+    renderer.render(scene, camera);
+  }
+
+  // Small info overlay
+  const info = document.createElement('div');
+  info.className = 'info';
+  // show initial cube location immediately
+  info.textContent = `pos: x=${cube.position.x.toFixed(2)} y=${cube.position.y.toFixed(2)} z=${cube.position.z.toFixed(2)}`;
+  info.style.color = '#fff';
+  container.appendChild(info);
+
+  // Status overlay
+  const statusDiv = document.createElement('div');
+  statusDiv.className = 'status';
+  statusDiv.textContent = 'Connecting to server...';
+  statusDiv.style.cssText = 'position: absolute; top: 10px; left: 10px; color: #4aa3f0; font-size: 16px; font-family: monospace;';
+  container.appendChild(statusDiv);
+
+  // Initialize WebSocket and start animation
+  initWebSocket();
+  animate();
+  
+})();

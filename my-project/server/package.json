@@ -1,0 +1,15 @@
+{
+  "name": "p2p-voice-chat-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for P2P communication",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["websocket", "p2p", "threejs"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2"
+  }
+}

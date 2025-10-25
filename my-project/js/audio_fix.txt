@@ -1,0 +1,28 @@
+      console.log('Received remote audio track');
+      
+      // Resume audio context if suspended (browser policy)
+      if (audioContext.state === 'suspended') {
+        audioContext.resume().then(() => {
+          console.log('AudioContext resumed');
+        });
+      }
+      
+      // Create an audio element to actually play the sound
+      const remoteAudio = new Audio();
+      remoteAudio.srcObject = event.streams[0];
+      remoteAudio.autoplay = true;
+      
+      // ALSO route through Web Audio API for volume control
+      const source = audioContext.createMediaStreamSource(event.streams[0]);
+      
+      // Disconnect the audio element's default output and route through gain
+      const destination = audioContext.createMediaStreamDestination();
+      source.connect(gainNode);
+      gainNode.connect(destination);
+      
+      // Update the audio element to use our controlled stream
+      remoteAudio.srcObject = destination.stream;
+      
+      remoteAudio.play().then(() => {
+        console.log('✅ Audio playing with proximity control active!');
+      }).catch(e => console.error('Error playing audio:', e));
