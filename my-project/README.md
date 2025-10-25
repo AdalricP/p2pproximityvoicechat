@@ -1,26 +1,7 @@
-# Three.js Cube Demo
+A simple peer-to-peer proximity chat implementation in webRTC + threeJS
 
-A very small demo using raw HTML/CSS/JS and Three.js (CDN). Open `index.html` in your browser to see a rotating cube.
+use 
+`node server.js`
+to launch
 
-How to run:
-
-- Quick (open file):
-
-  - Double-click `index.html` or open it in your browser (some browsers restrict local file access for modules, but this demo uses the non-module build so it should work).
-
-- Recommended (local server):
-
-  Run a simple HTTP server from the project root to avoid any file restrictions. Example (macOS / zsh):
-
-  ```bash
-  python3 -m http.server 8000
-  # then open http://127.0.0.1:8000 in your browser
-  ```
-
-Files added:
-
-- `index.html` — demo page
-- `css/style.css` — layout and minimal styling
-- `js/script.js` — Three.js scene setup and animation
-
-If you'd like OrbitControls, a UI, or an ES module version, I can add that next.
+<img width="1440" height="783" alt="Screenshot 2025-10-26 at 3 02 31 AM" src="https://github.com/user-attachments/assets/dd4bc7bc-b569-470e-b698-1206b28713a3" />
