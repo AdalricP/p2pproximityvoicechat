@@ -3,17 +3,33 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-// Load SSL certificates
-const serverOptions = {
-  key: fs.readFileSync(path.join(__dirname, 'server.key')),
-  cert: fs.readFileSync(path.join(__dirname, 'server.cert'))
-};
+// Load SSL certificates with error handling
+let serverOptions;
+try {
+  serverOptions = {
+    key: fs.readFileSync(path.join(__dirname, 'server.key')),
+    cert: fs.readFileSync(path.join(__dirname, 'server.cert'))
+  };
+} catch (error) {
+  console.error('Error loading SSL certificates:', error.message);
+  console.error('Please generate certificates with:');
+  console.error('  openssl req -nodes -new -x509 -keyout server.key -out server.cert -days 365');
+  process.exit(1);
+}
 
 // Create HTTPS server to serve static files
 const server = https.createServer(serverOptions, (req, res) => {
   // Serve files from parent directory
   const baseDir = path.join(__dirname, '..');
-  let filePath = path.join(baseDir, req.url === '/' ? 'index.html' : req.url);
+  const requestedPath = req.url === '/' ? 'index.html' : req.url;
+  let filePath = path.normalize(path.join(baseDir, requestedPath));
+
+  // Prevent path traversal attacks by ensuring the resolved path is within baseDir
+  if (!filePath.startsWith(baseDir)) {
+    res.writeHead(403);
+    res.end('Access denied');
+    return;
+  }
 
   // Get file extension
   const ext = path.extname(filePath);

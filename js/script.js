@@ -1,49 +1,38 @@
-// Basic Three.js cube demo (non-module version)
 (function () {
   const container = document.getElementById('container');
 
-  // WebSocket variables
   let ws;
   let myPlayerId;
   let otherPlayerCube;
   let lastSentTime = 0;
-  const UPDATE_INTERVAL = 50; // Send updates every 50ms
+  const UPDATE_INTERVAL = 50;
 
-  // Voice chat variables
   let localStream;
   let peerConnection;
   let audioContext;
   let gainNode;
-  let dataChannel; // P2P data channel for position updates
-  const MAX_VOICE_DISTANCE = 10; // Maximum distance to hear voice
+  let dataChannel;
+  const MAX_VOICE_DISTANCE = 10;
   const configuration = {
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
   };
 
-  // Scene, camera, renderer
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x111111);
 
   const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
   camera.position.set(0, 0, 20.0);
-  // Ensure camera looks at the scene center where the cube is placed
   camera.lookAt(0, 0, 0);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio ? window.devicePixelRatio : 1);
   renderer.setSize(window.innerWidth, window.innerHeight);
-  // Make canvas behave like a block-level element and avoid inline spacing issues
   renderer.domElement.style.display = 'block';
   container.appendChild(renderer.domElement);
 
-  // Simple keyboard state map
-  // Keys are stored by their `e.key` (e.g. 'ArrowRight', 'a', ' ') so you can check
-  // `keyboard['ArrowRight']` in the animation loop (already present in the file).
   const keyboard = {};
 
-  // Prevent arrow keys from scrolling the page and track key state
   window.addEventListener('keydown', function (e) {
-    // prevent page scroll for common navigation keys used here
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
       e.preventDefault();
     }
@@ -54,17 +43,13 @@
     keyboard[e.key] = false;
   }, false);
 
-  // Cube
   const geometry = new THREE.BoxGeometry(1, 1, 1);
   const material = new THREE.MeshStandardMaterial({ color: 0x4aa3f0, metalness: 0.2, roughness: 0.6 });
   const cube = new THREE.Mesh(geometry, material);
-  // ensure cube is centered in the world
   cube.position.set(0, 0, 0);
   scene.add(cube);
 
-  // WebSocket Functions
   function initWebSocket() {
-    // Connect to the same server the page was loaded from
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.hostname;
     const port = window.location.port || '8080';
@@ -74,7 +59,7 @@
     ws.onopen = () => {
       console.log('Connected to server');
       updateStatus('Connected to server');
-      initVoiceChat(); // Initialize voice chat after connecting
+      initVoiceChat();
     };
     
     ws.onmessage = (event) => {
@@ -95,7 +80,6 @@
           break;
           
         case 'position':
-          // Fallback to WebSocket if P2P data channel not ready
           if (!dataChannel || dataChannel.readyState !== 'open') {
             updateOtherPlayer(data.position, data.rotation);
             updateProximityVolume(data.position);
@@ -114,7 +98,6 @@
           updateStatus('Server is full (max 2 players)');
           break;
 
-        // WebRTC signaling messages
         case 'offer':
           handleOffer(data.offer);
           break;
@@ -148,7 +131,6 @@
         rotation: { x: rotation.x, y: rotation.y, z: rotation.z }
       });
 
-      // Try P2P data channel first, fallback to WebSocket
       if (dataChannel && dataChannel.readyState === 'open') {
         dataChannel.send(positionData);
       } else if (ws && ws.readyState === WebSocket.OPEN) {
@@ -160,7 +142,7 @@
   }
 
   function createOtherPlayerCube() {
-    if (otherPlayerCube) return; // Already exists
+    if (otherPlayerCube) return;
     
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshStandardMaterial({ color: 0xff4444, metalness: 0.2, roughness: 0.6 });
@@ -189,10 +171,8 @@
     }
   }
 
-  // Voice Chat Functions
   async function initVoiceChat() {
     try {
-      // Check if getUserMedia is available
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('getUserMedia not supported. Please open via HTTP (http://localhost:8080), not file://');
       }
@@ -201,7 +181,6 @@
       console.log('Microphone access granted');
       updateStatus('Microphone ready. Waiting for other player...');
       
-      // Create audio context for proximity volume control
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
       gainNode = audioContext.createGain();
       gainNode.connect(audioContext.destination);
@@ -210,7 +189,6 @@
       console.error('Error accessing microphone:', error);
       updateStatus('❌ Error: ' + error.message);
       
-      // Show helpful message if opened via file://
       if (window.location.protocol === 'file:') {
         updateStatus('⚠️ Please open http://localhost:8080 (not file://)');
       }
@@ -225,7 +203,6 @@
 
     peerConnection = new RTCPeerConnection(configuration);
 
-    // Create P2P data channel for position updates
     dataChannel = peerConnection.createDataChannel('gameData');
     
     dataChannel.onopen = () => {
@@ -251,25 +228,26 @@
       updateStatus('P2P connection lost - using server relay');
     };
 
-    // Add local audio tracks
     localStream.getTracks().forEach(track => {
       peerConnection.addTrack(track, localStream);
     });
 
-    // Handle incoming audio
     peerConnection.ontrack = (event) => {
       console.log('Received remote audio track');
+      
+      // Audio element is muted because we route audio through Web Audio API's
+      // GainNode for proximity-based volume control instead
       const remoteAudio = new Audio();
       remoteAudio.srcObject = event.streams[0];
+      remoteAudio.muted = true;
+      remoteAudio.play().catch(e => console.error('Error playing audio:', e));
       
-      // Connect to gain node for proximity audio
       const source = audioContext.createMediaStreamSource(event.streams[0]);
       source.connect(gainNode);
       
-      remoteAudio.play().catch(e => console.error('Error playing audio:', e));
+      console.log('Audio routing: Remote stream → Gain Node → Output');
     };
 
-    // Handle ICE candidates
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         ws.send(JSON.stringify({
@@ -279,7 +257,6 @@
       }
     };
 
-    // Create and send offer
     try {
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
@@ -302,7 +279,6 @@
 
     peerConnection = new RTCPeerConnection(configuration);
 
-    // Handle incoming data channel from the other peer
     peerConnection.ondatachannel = (event) => {
       dataChannel = event.channel;
       
@@ -328,25 +304,26 @@
       };
     };
 
-    // Add local audio tracks
     localStream.getTracks().forEach(track => {
       peerConnection.addTrack(track, localStream);
     });
 
-    // Handle incoming audio
     peerConnection.ontrack = (event) => {
       console.log('Received remote audio track');
+      
+      // Audio element is muted because we route audio through Web Audio API's
+      // GainNode for proximity-based volume control instead
       const remoteAudio = new Audio();
       remoteAudio.srcObject = event.streams[0];
+      remoteAudio.muted = true;
+      remoteAudio.play().catch(e => console.error('Error playing audio:', e));
       
-      // Connect to gain node for proximity audio
       const source = audioContext.createMediaStreamSource(event.streams[0]);
       source.connect(gainNode);
       
-      remoteAudio.play().catch(e => console.error('Error playing audio:', e));
+      console.log('Audio routing: Remote stream → Gain Node → Output');
     };
 
-    // Handle ICE candidates
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         ws.send(JSON.stringify({
@@ -392,33 +369,22 @@
   function updateProximityVolume(otherPosition) {
     if (!gainNode || !cube || !otherPosition) return;
 
-    // Calculate distance between players
     const distance = Math.sqrt(
       Math.pow(cube.position.x - otherPosition.x, 2) +
       Math.pow(cube.position.y - otherPosition.y, 2) +
       Math.pow(cube.position.z - otherPosition.z, 2)
     );
 
-    // Inverse square law: volume = 1 / (distance^2)
-    // Add a small reference distance to prevent division by zero and extreme volumes
-    const referenceDistance = 1.0; // Minimum distance for full volume
-    const adjustedDistance = Math.max(distance, referenceDistance);
-    
-    // Calculate volume using inverse square law
-    let volume = Math.pow(referenceDistance / adjustedDistance, 2);
-    
-    // Scale down if beyond max distance
-    if (distance > MAX_VOICE_DISTANCE) {
-      volume = 0;
+    let volume = 1.0;
+    if (distance > 0.5) {
+      volume = Math.max(0, 1 - (distance / MAX_VOICE_DISTANCE));
     }
-    
-    // Clamp volume between 0 and 1
-    volume = Math.max(0, Math.min(1, volume));
 
-    gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+    volume = Math.pow(volume, 2);
     
-    // Log every update to see distance and volume
-    console.log(`📏 Distance: ${distance.toFixed(2)} | 🔊 Volume: ${volume.toFixed(3)} | Formula: 1/(${adjustedDistance.toFixed(2)})² = ${volume.toFixed(3)}`);
+    console.log(`Distance: ${distance.toFixed(2)}, Volume: ${volume.toFixed(3)}`);
+    
+    gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
   }
 
   function closePeerConnection() {
@@ -432,7 +398,6 @@
     }
   }
 
-  // Light
   const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
   hemi.position.set(0, 1, 0);
   scene.add(hemi);
@@ -441,7 +406,6 @@
   dir.position.set(5, 10, 7.5);
   scene.add(dir);
 
-  // Resize handling
   function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -449,45 +413,36 @@
   }
   window.addEventListener('resize', onWindowResize, false);
 
-  // Animation loop
   function animate() {
     requestAnimationFrame(animate);
-    // Arrow key movement (adjust values to taste)
     if (keyboard['ArrowRight']) cube.position.x += 0.3;
     if (keyboard['ArrowLeft'])  cube.position.x -= 0.3;
     if (keyboard['ArrowUp'])    cube.position.y += 0.3;
     if (keyboard['ArrowDown'])  cube.position.y -= 0.3;
-    // Spacebar to reset position
     if (keyboard[' ']) {
       cube.position.set(0, 0, 0);
     }
     
-    // Send position updates to other player
     sendPosition(cube.position, cube.rotation);
     
-    // Update overlay with cube position if overlay exists
     if (typeof info !== 'undefined' && info) {
       info.textContent = `pos: x=${cube.position.x.toFixed(2)} y=${cube.position.y.toFixed(2)} z=${cube.position.z.toFixed(2)}`;
     }
     renderer.render(scene, camera);
   }
 
-  // Small info overlay
   const info = document.createElement('div');
   info.className = 'info';
-  // show initial cube location immediately
   info.textContent = `pos: x=${cube.position.x.toFixed(2)} y=${cube.position.y.toFixed(2)} z=${cube.position.z.toFixed(2)}`;
   info.style.color = '#fff';
   container.appendChild(info);
 
-  // Status overlay
   const statusDiv = document.createElement('div');
   statusDiv.className = 'status';
   statusDiv.textContent = 'Connecting to server...';
   statusDiv.style.cssText = 'position: absolute; top: 10px; left: 10px; color: #4aa3f0; font-size: 16px; font-family: monospace;';
   container.appendChild(statusDiv);
 
-  // Initialize WebSocket and start animation
   initWebSocket();
   animate();
   
