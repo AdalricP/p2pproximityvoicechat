@@ -235,6 +235,8 @@
     peerConnection.ontrack = (event) => {
       console.log('Received remote audio track');
       
+      // Audio element is muted because we route audio through Web Audio API's
+      // GainNode for proximity-based volume control instead
       const remoteAudio = new Audio();
       remoteAudio.srcObject = event.streams[0];
       remoteAudio.muted = true;
@@ -309,6 +311,8 @@
     peerConnection.ontrack = (event) => {
       console.log('Received remote audio track');
       
+      // Audio element is muted because we route audio through Web Audio API's
+      // GainNode for proximity-based volume control instead
       const remoteAudio = new Audio();
       remoteAudio.srcObject = event.streams[0];
       remoteAudio.muted = true;

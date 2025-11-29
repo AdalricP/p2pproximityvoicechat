@@ -1,41 +1,27 @@
-# 🎮 P2P Proximity Voice Chat
+# P2P Proximity Voice Chat
 
-A real-time multiplayer experience with **proximity-based voice chat** using WebRTC peer-to-peer connections and Three.js for 3D visualization.
+A real-time multiplayer demo with proximity-based voice chat. Players are represented as cubes in a 3D scene - the closer you are to another player, the louder you hear them.
 
-![Three.js](https://img.shields.io/badge/Three.js-000000?style=for-the-badge&logo=three.js&logoColor=white)
-![WebRTC](https://img.shields.io/badge/WebRTC-333333?style=for-the-badge&logo=webrtc&logoColor=white)
-![WebSocket](https://img.shields.io/badge/WebSocket-010101?style=for-the-badge&logo=socket.io&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=node.js&logoColor=white)
+Built with Three.js for rendering, WebRTC for peer-to-peer audio/data, and a simple Node.js signaling server.
 
----
+## Features
 
-## ✨ Features
+- **Proximity voice chat** - Volume scales with distance between players
+- **Direct P2P connection** - Audio and position data sent directly between browsers via WebRTC
+- **Real-time sync** - See other players move around the scene
+- **LAN support** - Connect from multiple devices on the same network
 
-- 🎤 **Proximity Voice Chat** — Voice volume automatically adjusts based on the distance between players
-- 🔗 **Peer-to-Peer Connection** — Direct P2P communication via WebRTC for low latency
-- 🎮 **Real-time Movement** — Control your cube with arrow keys and see other players move in real-time
-- 🔒 **Secure Communication** — HTTPS/WSS for secure signaling and connections
-- 📱 **Cross-Device Support** — Works across devices on the same network
+## How It Works
 
----
+Two players connect to the signaling server, which helps establish a direct WebRTC connection between them. Once connected, audio streams and position updates flow directly between browsers without going through the server.
 
-## 🎯 How It Works
-
-1. **Connect** — Two players connect to the same server
-2. **P2P Setup** — WebRTC establishes a direct peer-to-peer connection
-3. **Voice Chat** — Audio streams are transmitted directly between peers
-4. **Proximity Audio** — Volume is calculated using inverse square law based on 3D distance
-5. **Move & Talk** — Move your cube around and experience spatial audio!
+Volume is calculated using inverse square law:
 
 ```
 Volume = 1 / distance²
 ```
 
-When players are close, they hear each other loudly. As they move apart, the volume decreases naturally.
-
----
-
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -73,21 +59,17 @@ When players are close, they hear each other loudly. As they move apart, the vol
    - Local: `https://localhost:8080`
    - LAN: `https://<your-ip>:8080` (for connecting from other devices)
 
----
-
-## 🎮 Controls
+## Controls
 
 | Key | Action |
 |-----|--------|
-| ⬆️ Arrow Up | Move up |
-| ⬇️ Arrow Down | Move down |
-| ⬅️ Arrow Left | Move left |
-| ➡️ Arrow Right | Move right |
+| Arrow Up | Move up |
+| Arrow Down | Move down |
+| Arrow Left | Move left |
+| Arrow Right | Move right |
 | Space | Reset position |
 
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 p2pproximityvoicechat/
@@ -104,20 +86,15 @@ p2pproximityvoicechat/
 └── README.md
 ```
 
----
+## Technical Details
 
-## 🔧 Technical Details
+**Stack:**
+- Three.js for 3D rendering
+- WebRTC for P2P audio and data channels
+- WebSocket for signaling
+- Web Audio API (GainNode) for volume control
 
-### Technologies Used
-
-| Technology | Purpose |
-|------------|---------|
-| **Three.js** | 3D rendering and scene management |
-| **WebRTC** | Peer-to-peer audio streaming and data channels |
-| **WebSocket** | Signaling server for WebRTC negotiation |
-| **Web Audio API** | Proximity-based volume control via GainNode |
-
-### Architecture
+**Architecture:**
 
 ```
 ┌─────────────┐                        ┌─────────────┐
@@ -134,38 +111,8 @@ p2pproximityvoicechat/
               └───────────────┘
 ```
 
-### Key Features Implementation
+Position updates use the WebRTC DataChannel when available, falling back to WebSocket relay if needed. Uses Google's public STUN server for NAT traversal.
 
-- **Proximity Audio**: Uses Web Audio API's `GainNode` to dynamically adjust volume based on 3D Euclidean distance
-- **P2P Data Channel**: Position updates are sent via WebRTC DataChannel when available, with WebSocket fallback
-- **STUN Server**: Uses Google's public STUN server for NAT traversal
+## License
 
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Feel free to:
-
-- 🐛 Report bugs
-- 💡 Suggest new features
-- 🔧 Submit pull requests
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [package.json](server/package.json) for details.
-
----
-
-## 🙏 Acknowledgments
-
-- [Three.js](https://threejs.org/) for the amazing 3D library
-- [WebRTC](https://webrtc.org/) for making P2P communication possible
-- All contributors and testers!
-
----
-
-<p align="center">
-  Made with ❤️ and JavaScript
-</p>
+MIT
